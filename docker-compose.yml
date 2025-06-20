@@ -15,6 +15,14 @@ services:
     depends_on:
       - mongo # Ensure mongo starts before user_service as user_service depends on it(mongo)
 
+  task_service:
+    build: ./task-service
+    container_name: task-service
+    ports:
+      - "3002:3002"
+    depends_on:
+      - mongo # Ensure mongo starts before user_service as user_service depends on it(mongo)
+
 volumes:
   mongo_data:
     driver: local
