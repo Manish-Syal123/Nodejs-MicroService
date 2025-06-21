@@ -3,31 +3,35 @@ const app = express();
 const bodyParser = require("body-parser");
 require("./db/index");
 const Task = require("./model/taskSchema");
-const amqp = require("amqplib");
+const { Kafka } = require("kafkajs");
 const PORT = 3002;
 
 app.use(bodyParser.json());
 
-let channel, connection;
+// Initialize Kafka client
+const kafka = new Kafka({
+  clientId: "my-kafka-task-service",
+  brokers: [process.env.KAFKA_BROKER || "localhost:9092"], // Use env var or default
+});
 
-async function connectToRabbitMQWithRetry(retries = 5, delay = 3000) {
+const producer = kafka.producer();
+
+async function connectToKafkaWithRetry(retries = 5, delay = 3000) {
   while (retries) {
     try {
-      connection = await amqp.connect("amqp://rabbitmq_node");
-      channel = await connection.createChannel();
-      await channel.assertQueue("task_Queue", { durable: true });
-      console.log("Connected to RabbitMQ");
+      await producer.connect();
+      console.log("Connected to Kafka");
       return;
     } catch (error) {
-      console.log(`Error connecting to RabbitMQ: ${error.message}`);
+      console.log(`Error connecting to Kafka: ${error.message}`);
       retries--;
       console.log(
-        `Retrying connection to RabbitMQ in ${
+        `Retrying connection to Kafka in ${
           delay / 1000
         } seconds... (${retries} retries left)`
       );
       if (retries === 0) {
-        console.error("Failed to connect to RabbitMQ after multiple attempts");
+        console.error("Failed to connect to Kafka after multiple attempts");
         process.exit(1);
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -56,11 +60,14 @@ app.post("/tasks", async (req, res) => {
       },
     };
 
-    if (!channel) {
-      return res.status(503).json({ error: "RabbitMq is not connected" });
-    }
+    // Removed invalid isConnected check
 
-    channel.sendToQueue("task_Queue", Buffer.from(JSON.stringify(taskMessage)));
+    await producer.send({
+      topic: "task_queue_topic",
+      messages: [{ value: JSON.stringify(taskMessage) }],
+    });
+    console.log("Messages sent successfully!");
+    // Removed producer.disconnect() to keep connection alive
 
     res.status(201).json(task);
   } catch (error) {
@@ -85,5 +92,5 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Task Service is running on port http://localhost:${PORT}`);
-  connectToRabbitMQWithRetry();
+  connectToKafkaWithRetry();
 });
